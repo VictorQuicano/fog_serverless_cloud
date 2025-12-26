@@ -1,0 +1,91 @@
+---
+- name: Subir archivos CSV al bucket GCP organizados por ciudad
+  hosts: localhost
+  gather_facts: no
+  vars:
+    gcp_project_id: "arduino-tesis"
+    bucket_name: "iot-sensor-data-raw"
+    service_account_key_path: "../sa-ansible-key.json"
+    data_directory: "../data/dataset"
+    cities:
+      Antwerp: "Antwerp"
+      Oslo: "Oslo"
+      Zagreb: "Zagreb"
+
+  tasks:
+    - name: Encontrar todos los archivos CSV en data/dataset
+      find:
+        paths: "{{ data_directory }}"
+        patterns: "*.csv"
+        file_type: file
+      register: csv_files
+
+    - name: Mostrar archivos encontrados
+      debug:
+        msg: "Se encontraron {{ csv_files.matched }} archivos CSV"
+
+    - name: Procesar y subir archivos por ciudad
+      block:
+        - name: Subir archivos que comienzan con Antwerp
+          shell: |
+            for file in {{ data_directory }}/Antwerp*.csv; do
+              if [ -f "$file" ]; then
+                gsutil -m cp "$file" gs://{{ bucket_name }}/Antwerp/
+                echo "Subido: $file a Antwerp/"
+              fi
+            done
+          environment:
+            GOOGLE_APPLICATION_CREDENTIALS: "{{ service_account_key_path }}"
+          register: antwerp_result
+          changed_when: "antwerp_result.rc == 0"
+
+        - name: Subir archivos que comienzan con Oslo
+          shell: |
+            for file in {{ data_directory }}/Oslo*.csv; do
+              if [ -f "$file" ]; then
+                gsutil -m cp "$file" gs://{{ bucket_name }}/Oslo/
+                echo "Subido: $file a Oslo/"
+              fi
+            done
+          environment:
+            GOOGLE_APPLICATION_CREDENTIALS: "{{ service_account_key_path }}"
+          register: oslo_result
+          changed_when: "oslo_result.rc == 0"
+
+        - name: Subir archivos que comienzan con Zagreb
+          shell: |
+            for file in {{ data_directory }}/Zagreb*.csv; do
+              if [ -f "$file" ]; then
+                gsutil -m cp "$file" gs://{{ bucket_name }}/Zagreb/
+                echo "Subido: $file a Zagreb/"
+              fi
+            done
+          environment:
+            GOOGLE_APPLICATION_CREDENTIALS: "{{ service_account_key_path }}"
+          register: zagreb_result
+          changed_when: "zagreb_result.rc == 0"
+
+    - name: Crear resumen de carga
+      debug:
+        msg: |
+          ✓ Carga completada
+          ✓ Bucket: gs://{{ bucket_name }}/
+          
+          Estructura creada:
+          - gs://{{ bucket_name }}/Antwerp/
+          - gs://{{ bucket_name }}/Oslo/
+          - gs://{{ bucket_name }}/Zagreb/
+          
+          Total de archivos encontrados: {{ csv_files.matched }}
+
+    - name: Verificar archivos subidos
+      shell: |
+        echo "=== Archivos en el bucket ==="
+        gsutil ls -r gs://{{ bucket_name }}/
+      environment:
+        GOOGLE_APPLICATION_CREDENTIALS: "{{ service_account_key_path }}"
+      register: bucket_contents
+
+    - name: Mostrar contenido del bucket
+      debug:
+        msg: "{{ bucket_contents.stdout_lines }}"

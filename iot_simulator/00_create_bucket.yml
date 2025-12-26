@@ -1,0 +1,74 @@
+---
+- name: Crear bucket GCP para datos de sensores IoT
+  hosts: localhost
+  gather_facts: no
+  vars:
+    gcp_project_id: "arduino-tesis"
+    bucket_name: "iot-sensor-data-raw"
+    service_account_key_path: "../sa-ansible-key.json"
+    cloud_run_sa: "{{ gcp_project_id }}@appspot.gserviceaccount.com"
+
+  tasks:
+    - name: Crear bucket GCS
+      google.cloud.gcp_storage_bucket:
+        name: "{{ bucket_name }}"
+        project: "{{ gcp_project_id }}"
+        auth_kind: "serviceaccount"
+        service_account_file: "{{ service_account_key_path }}"
+        location: "US"
+        storage_class: "STANDARD"
+        state: "present"
+      register: bucket_result
+
+    - name: Mostrar información del bucket creado
+      debug:
+        msg: "Bucket '{{ bucket_result.name }}' creado exitosamente en {{ bucket_result.location }}"
+
+    - name: Otorgar permisos Storage Object Admin a Cloud Run service account
+      shell: |
+        gcloud storage buckets add-iam-policy-binding gs://{{ bucket_name }} \
+          --member=serviceAccount:{{ cloud_run_sa }} \
+          --role=roles/storage.objectAdmin \
+          --project={{ gcp_project_id }}
+      environment:
+        GOOGLE_APPLICATION_CREDENTIALS: "{{ service_account_key_path }}"
+      register: iam_result
+
+    - name: Mostrar resultado de permisos
+      debug:
+        msg: "Permisos asignados a Cloud Run service account: {{ cloud_run_sa }}"
+
+    - name: Configurar CORS en el bucket
+      shell: |
+        cat > /tmp/cors-config.json << 'EOF'
+        [
+          {
+            "origin": ["*"],
+            "method": ["GET", "PUT", "POST", "DELETE"],
+            "responseHeader": ["Content-Type"],
+            "maxAgeSeconds": 3600
+          }
+        ]
+        EOF
+        gcloud storage buckets update gs://{{ bucket_name }} \
+          --cors-file=/tmp/cors-config.json \
+          --project={{ gcp_project_id }}
+      environment:
+        GOOGLE_APPLICATION_CREDENTIALS: "{{ service_account_key_path }}"
+      register: cors_result
+
+    - name: Mostrar resultado de CORS
+      debug:
+        msg: "Configuración CORS aplicada al bucket"
+
+    - name: Resumen final de configuración
+      debug:
+        msg: |
+          ✓ Bucket '{{ bucket_name }}' creado exitosamente
+          ✓ Permisos IAM asignados a Cloud Run service account
+          ✓ CORS configurado
+          ✓ Project ID: {{ gcp_project_id }}
+          ✓ Cloud Run SA: {{ cloud_run_sa }}
+          ✓ URL del bucket: gs://{{ bucket_name }}/
+          
+          Tu Cloud Run puede acceder ahora a este bucket usando la credencial por defecto.
