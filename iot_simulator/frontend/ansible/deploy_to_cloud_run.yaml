@@ -1,0 +1,28 @@
+---
+- name: Desplegar Dashboard en Cloud Run
+  hosts: localhost
+  gather_facts: false
+  vars:
+    project_id: "arduino-tesis"
+    region: "europe-west1"  # Cambiado a europe-west1 para evitar problemas de cuota
+    service_name: "iot-dashboard"
+    image_name: "gcr.io/arduino-tesis/iot-sensor-dashboard"
+    service_account: "sa-ansible@arduino-tesis.iam.gserviceaccount.com"
+
+  tasks:
+    - name: Desplegar en Cloud Run (Service)
+      command: >
+        gcloud run deploy {{ service_name }}
+        --image {{ image_name }}:latest
+        --platform managed
+        --region {{ region }}
+        --project {{ project_id }}
+        --allow-unauthenticated
+        --port 8080
+        --service-account {{ service_account }}
+        --quiet
+      register: deploy_result
+
+    - name: Mostrar URL del servicio
+      debug:
+        msg: "✅ Dashboard desplegado exitosamente. Accede en: {{ deploy_result.stdout_lines | select('search', 'Service URL') | list }}"

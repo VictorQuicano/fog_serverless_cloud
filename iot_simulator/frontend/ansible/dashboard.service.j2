@@ -1,0 +1,14 @@
+[Unit]
+Description=IoT Simulator Dashboard
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory={{ app_dir }}
+Environment="GOOGLE_APPLICATION_CREDENTIALS={{ app_dir }}/sa-key.json"
+ExecStart=/usr/bin/python3 -m streamlit run app.py --server.port=8501 --server.address=0.0.0.0
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

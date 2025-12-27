@@ -1,0 +1,164 @@
+---
+- name: Desplegar Dashboard IoT
+  hosts: localhost
+  gather_facts: false
+  vars:
+    project_id: "arduino-tesis"
+    region: "us-central1"
+    zone: "us-central1-a"
+    instance_name: "iot-dashboard"
+    machine_type: "e2-medium"
+    image_family: "debian-11"
+    image_project: "debian-cloud"
+    sa_key_file: "../../../sa-ansible-key.json"  # Ruta relativa desde frontend/ansible/
+    
+  tasks:
+    - name: Crear regla de firewall para Streamlit (8501)
+      command: >
+        gcloud compute firewall-rules create allow-streamlit
+        --project="{{ project_id }}"
+        --allow=tcp:8501
+        --description="Permitir trafico al Dashboard IoT"
+        --target-tags=streamlit-server
+        --quiet
+      register: firewall_result
+      failed_when: firewall_result.rc != 0 and 'already exists' not in firewall_result.stderr
+      changed_when: firewall_result.rc == 0
+
+    - name: Crear instancia de Compute Engine
+      command: >
+        gcloud compute instances create {{ instance_name }}
+        --project="{{ project_id }}"
+        --zone="{{ zone }}"
+        --machine-type="{{ machine_type }}"
+        --image-family="{{ image_family }}"
+        --image-project="{{ image_project }}"
+        --tags=streamlit-server,http-server,https-server
+        --scopes=https://www.googleapis.com/auth/cloud-platform
+        --quiet
+      register: instance_creation
+      failed_when: instance_creation.rc != 0 and 'already exists' not in instance_creation.stderr
+      changed_when: instance_creation.rc == 0
+
+    - name: Esperar a que SSH esté disponible
+      command: >
+        gcloud compute ssh {{ instance_name }}
+        --project="{{ project_id }}"
+        --zone="{{ zone }}"
+        --command="echo SSH ready"
+        --quiet
+      register: ssh_check
+      retries: 20
+      delay: 10
+      until: ssh_check.rc == 0
+      changed_when: false
+
+    - name: Agregar host al inventario
+      add_host:
+        name: "{{ instance_name }}"
+        groups: dashboard_servers
+        ansible_host: "{{ instance_name }}"
+        ansible_connection: ssh
+        ansible_ssh_common_args: >-
+           -o UserKnownHostsFile=/dev/null 
+           -o StrictHostKeyChecking=no
+           -o ProxyCommand="gcloud compute ssh %h --project={{ project_id }} --zone={{ zone }} --command='nc %h %p'"
+
+- name: Configurar Dashboard
+  hosts: dashboard_servers
+  gather_facts: false
+  become: true
+  vars:
+    app_dir: /opt/dashboard
+    
+  tasks:
+    - name: Esperar a que la conexión SSH esté lista
+      wait_for_connection:
+        delay: 10
+        timeout: 300
+
+    - name: Recopilar facts (setup)
+      setup:
+
+    - name: Instalar dependencias del sistema
+      apt:
+        name:
+          - python3-pip
+          - python3-venv
+          - git
+        state: present
+        update_cache: yes
+
+    - name: Crear directorio de la aplicación
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user_id }}"
+
+    - name: Copiar código fuente
+      copy:
+        src: "../"  # Copia todo el contenido de iot_simulator/frontend/
+        dest: "{{ app_dir }}/"
+        mode: '0644'
+        # Excluir la carpeta ansible para no copiar recursivamente cosas innecesarias
+        # (Aunque copy module no tiene exclude simple, copiaremos archivos específicos mejor o subdirectory)
+
+    # Mejorando la copia para ser más clean
+    - name: Copiar archivos de la aplicación
+      copy:
+        src: "../{{ item }}"
+        dest: "{{ app_dir }}/{{ item }}"
+        mode: '0644'
+      with_items:
+        - app.py
+        - requirements.txt
+        - Dockerfile
+
+    - name: Copiar llave de cuenta de servicio (Autenticación BQ)
+      copy:
+        src: "../../../sa-ansible-key.json"
+        dest: "{{ app_dir }}/sa-key.json"
+        mode: '0600'
+
+    - name: Instalar dependencias Python
+      pip:
+        requirements: "{{ app_dir }}/requirements.txt"
+        executable: pip3
+        break_system_packages: true
+
+    - name: Crear servicio systemd
+      template:
+        src: dashboard.service.j2
+        dest: /etc/systemd/system/dashboard.service
+        mode: '0644'
+      notify: Reiniciar dashboard
+
+    - name: Iniciar y habilitar servicio
+      systemd:
+        name: dashboard
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+  handlers:
+    - name: Reiniciar dashboard
+      systemd:
+        name: dashboard
+        state: restarted
+
+- name: Mostrar Información de Conexión
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Obtener IP externa
+      command: >
+        gcloud compute instances describe {{ instance_name }}
+        --project="{{ project_id }}"
+        --zone="{{ zone }}"
+        --format="get(networkInterfaces[0].accessConfigs[0].natIP)"
+      register: external_ip
+    
+    - name: Mostrar URL
+      debug:
+        msg: "✅ Dashboard desplegado en: http://{{ external_ip.stdout }}:8501"
