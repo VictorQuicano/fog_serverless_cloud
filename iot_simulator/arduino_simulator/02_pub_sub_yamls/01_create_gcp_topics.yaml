@@ -1,0 +1,45 @@
+---
+- name: Crear topics de Pub/Sub en GCP
+  hosts: localhost
+  gather_facts: no
+  
+  vars:
+    project_id: "arduino_tesis"
+    service_account_key_file: "../../../sa-ansible-key.json"
+    topics:
+      - Antwerp
+      - Oslo
+      - Zagreb
+  
+  tasks:
+    - name: Configurar credenciales de GCP
+      ansible.builtin.set_fact:
+        gcp_credential: "{{ lookup('file', service_account_key_file) | from_json }}"
+    
+    - name: Autenticar en GCP
+      google.cloud.gcp_auth:
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ service_account_key_file }}"
+        scopes:
+          - https://www.googleapis.com/auth/pubsub
+          - https://www.googleapis.com/auth/cloud-platform
+      register: gcp_auth
+    
+    - name: Crear topics de Pub/Sub
+      google.cloud.gcp_pubsub_topic:
+        name: "{{ item }}"
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ service_account_key_file }}"
+        state: present
+      loop: "{{ topics }}"
+      register: topic_results
+    
+    - name: Mostrar resultados
+      ansible.builtin.debug:
+        msg: "Topic '{{ item.name }}' creado exitosamente"
+      loop: "{{ topic_results.results }}"
+      when: item.changed
+      loop_control:
+        label: "{{ item.topic }}"

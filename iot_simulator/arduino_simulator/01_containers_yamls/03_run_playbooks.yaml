@@ -1,0 +1,40 @@
+---
+- name: Gestión de contenedores Cloud Run por ciudad
+  hosts: localhost
+  gather_facts: no
+  vars:
+    project_id: "tu-proyecto-id"
+    
+    # Mapeo de ciudades a regiones de GCP más cercanas
+    city_regions:
+      Antwerp:
+        region: "europe-west1"  # Bélgica
+        zone: "europe-west1-b"
+      Oslo:
+        region: "europe-north1"  # Finlandia (más cercana a Noruega)
+        zone: "europe-north1-a"
+      Zagreb:
+        region: "europe-central2"  # Polonia (más cercana a Croacia)
+        zone: "europe-central2-a"
+    
+    bucket_name: "iot-sensor-data-raw"
+    service_account_key_path: "../../sa-ansible-key.json"
+    
+  tasks:
+    - name: Solicitar número de contenedores por ciudad
+      pause:
+        prompt: "Ingrese el número de contenedores a crear por ciudad (n):"
+      register: user_input
+      
+    - name: Establecer número de contenedores
+      set_fact:
+        num_containers_per_city: "{{ user_input.user_input | int }}"
+    
+    - name: Iterar sobre cada ciudad
+      include_tasks: 02_for_city.yaml
+      loop:
+        - Antwerp
+        - Oslo
+        - Zagreb
+      loop_control:
+        loop_var: city_name

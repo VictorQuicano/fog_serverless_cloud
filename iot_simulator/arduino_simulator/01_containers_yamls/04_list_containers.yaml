@@ -1,0 +1,34 @@
+---
+- name: Listar contenedores por ciudad
+  hosts: localhost
+  gather_facts: no
+  vars:
+    project_id: "arduino-tesis"
+    city_regions:
+      Antwerp: "europe-west1"
+      Oslo: "europe-north1"
+      Zagreb: "europe-central2"
+    
+  tasks:
+    - name: Obtener todos los servicios Cloud Run
+      gcp_cloud_run_service_info:
+        location: "{{ item.value }}"
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "../../sa-ansible-key.json"
+      loop: "{{ city_regions | dict2items }}"
+      loop_control:
+        loop_var: city_region
+      register: all_services
+
+    - name: Mostrar resumen por ciudad
+      debug:
+        msg: |
+          ===== {{ city_region.key }} ({{ city_region.value }}) =====
+          Total servicios: {{ city_region_item.resources | length }}
+          {% for service in city_region_item.resources %}
+          - {{ service.name.split('/')[-1] }}: {{ service.status.url }}
+          {% endfor %}
+      loop: "{{ all_services.results }}"
+      loop_control:
+        loop_var: city_region_item

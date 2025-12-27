@@ -1,0 +1,45 @@
+---
+- name: Procesar ciudad {{ city_name }}
+  vars:
+    project_id: "arduino-tesis"
+    bucket_name: "iot-sensor-data-raw"
+    service_account_key_path: "../../sa-ansible-key.json"
+  block:
+    - name: Obtener región para la ciudad
+      set_fact:
+        target_region: "{{ city_regions[city_name].region }}"
+        target_zone: "{{ city_regions[city_name].zone }}"
+    
+    - name: Listar archivos CSV en la carpeta de la ciudad
+      gcp_storage_object_info:
+        bucket: "{{ bucket_name }}"
+        prefix: "{{ city_name }}/"
+        project: "{{ project_id }}"
+        auth_kind: serviceaccount
+        service_account_file: "{{ service_account_key_path }}"
+      register: city_files
+      
+    - name: Extraer solo nombres de archivos CSV
+      set_fact:
+        csv_files: "{{ city_files.objects | selectattr('name', 'match', '.*\\.csv$') | map(attribute='name') | list }}"
+    
+    - name: Verificar si hay archivos disponibles
+      assert:
+        that:
+          - csv_files|length > 0
+        fail_msg: "No hay archivos CSV en {{ city_name }}."
+    
+    - name: Crear contenedores ({{ num_containers_per_city }} por ciudad)
+      include_tasks: 01_cloud-run-manager.yaml
+      loop: "{{ range(0, num_containers_per_city | int) | list }}"
+      loop_control:
+        loop_var: current_index
+      vars:
+        container_number: "{{ current_index + 1 }}"
+        file_path: "{{ csv_files[current_index % (csv_files | length)] }}"
+        
+  rescue:
+    - name: Registrar error para esta ciudad
+      debug:
+        msg: "Error procesando {{ city_name }}: {{ ansible_failed_result.msg }}"
+      failed_when: false

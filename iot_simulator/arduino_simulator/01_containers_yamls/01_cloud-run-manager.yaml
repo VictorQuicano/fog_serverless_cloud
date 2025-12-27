@@ -1,0 +1,58 @@
+---
+- name: Extraer nombre del archivo del path
+  set_fact:
+    file_name: "{{ file_path.split('/')[-1] }}"
+    city_folder: "{{ file_path.split('/')[0] }}"
+
+- name: Generar nombre único para el servicio
+  set_fact:
+    service_name: "sensor-{{ city_name }}-{{ container_number }}-{{ 100000 | random | string }}"
+
+- name: Crear servicio Cloud Run
+  set_fact:
+    service_account_file: "../../sa-ansible-key.json"
+  gcp_cloud_run_service:
+    name: "{{ service_name }}"
+    location: "{{ target_region }}"
+    project: "{{ project_id }}"
+    auth_kind: serviceaccount
+    service_account_file: "{{ service_account_file }}"
+    state: present
+    template:
+      containers:
+        - image: "gcr.io/{{ project_id }}/sensor-processor:latest"
+          env:
+            - name: BUCKET_NAME
+              value: "{{ bucket_name }}"
+            - name: ZONE
+              value: "{{ target_zone }}"
+            - name: CITY
+              value: "{{ city_name }}"
+            - name: FILE_TO_PROCESS
+              value: "{{ file_name }}"
+            - name: FILE_PATH
+              value: "{{ file_path }}"
+            - name: CONTAINER_ID
+              value: "{{ service_name }}"
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 512Mi
+          # Si necesitas comandos específicos
+          # command: ["python", "processor.py"]
+          # args: ["--city", "{{ city_name }}", "--file", "{{ file_name }}"]
+      service_account_file: "{{ service_account_file }}"
+      timeout_seconds: 300
+    traffic:
+      - percent: 100
+        latest_revision: true
+  register: service_creation
+
+- name: Mostrar información del servicio creado
+  debug:
+    msg: |
+      Ciudad: {{ city_name }}
+      Servicio: {{ service_name }}
+      Región: {{ target_region }}
+      Archivo: {{ file_name }}
+      URL: {{ service_creation.status.url if service_creation.status is defined else 'Pendiente' }}

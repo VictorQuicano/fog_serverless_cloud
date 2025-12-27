@@ -1,0 +1,34 @@
+---
+# Configuración de GCP
+gcp_project: "arduino-tesis"
+gcp_region_mapping:
+  Antwerp:
+    region: "europe-west1"
+    zones: ["europe-west1-b", "europe-west1-c", "europe-west1-d"]
+    country: "Belgium"
+    coordinates:
+      lat: 51.2194
+      lon: 4.4025
+  Oslo:
+    region: "europe-north1"
+    zones: ["europe-north1-a", "europe-north1-b", "europe-north1-c"]
+    country: "Norway"
+    coordinates:
+      lat: 59.9139
+      lon: 10.7522
+  Zagreb:
+    region: "europe-central2"
+    zones: ["europe-central2-a", "europe-central2-b"]
+    country: "Croatia"
+    coordinates:
+      lat: 45.8150
+      lon: 15.9819
+
+# Configuración de Cloud Run
+cloud_run_config:
+  cpu: "1000m"
+  memory: "512Mi"
+  max_instances: 10
+  min_instances: 0
+  timeout: 300
+  concurrency: 80

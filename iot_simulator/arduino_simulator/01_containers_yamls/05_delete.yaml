@@ -1,0 +1,74 @@
+---
+- name: Eliminar contenedores por ciudad o patrón
+  hosts: localhost
+  gather_facts: no
+  vars:
+    project_id: "tu-proyecto-id"
+    
+  tasks:
+    - name: Solicitar ciudad para eliminar
+      pause:
+        prompt: |
+          ¿Qué contenedores eliminar?
+          1. Todos
+          2. Por ciudad específica
+          3. Por patrón de nombre
+          
+          Ingrese opción (1, 2, o 3):
+      register: delete_option
+
+    - name: Procesar opción de eliminación
+      set_fact:
+        delete_choice: "{{ delete_option.user_input }}"
+
+    - name: Eliminar TODOS los servicios sensor-*
+      block:
+        - name: Obtener todas las regiones con servicios
+          gcp_cloud_run_service_info:
+            location: "{{ item }}"
+            project: "{{ project_id }}"
+            auth_kind: serviceaccount
+            service_account_file: "/path/to/service-account-key.json"
+          loop:
+            - europe-west1
+            - europe-north1
+            - europe-central2
+          register: services_to_delete
+
+        - name: Eliminar servicios que coincidan con patrón
+          gcp_cloud_run_service:
+            name: "{{ item.name.split('/')[-1] }}"
+            location: "{{ item.location.split('/')[-1] }}"
+            project: "{{ project_id }}"
+            auth_kind: serviceaccount
+            service_account_file: "/path/to/service-account-key.json"
+            state: absent
+          loop: "{{ services_to_delete.results | map(attribute='resources') | flatten }}"
+          when: "'sensor-' in item.name"
+      when: delete_choice == "1"
+
+    - name: Eliminar por ciudad específica
+      block:
+        - name: Solicitar ciudad
+          pause:
+            prompt: "Ingrese ciudad (Antwerp, Oslo, o Zagreb):"
+          register: city_to_delete
+
+        - name: Establecer región según ciudad
+          set_fact:
+            city_regions:
+              Antwerp: "europe-west1"
+              Oslo: "europe-north1"
+              Zagreb: "europe-central2"
+
+        - name: Eliminar servicios de la ciudad
+          gcp_cloud_run_service:
+            name: "{{ item.name.split('/')[-1] }}"
+            location: "{{ city_regions[city_to_delete.user_input] }}"
+            project: "{{ project_id }}"
+            auth_kind: serviceaccount
+            service_account_file: "/path/to/service-account-key.json"
+            state: absent
+          loop: "{{ services_in_city.resources }}"
+          when: "'sensor-' + city_to_delete.user_input in item.name"
+      when: delete_choice == "2"
