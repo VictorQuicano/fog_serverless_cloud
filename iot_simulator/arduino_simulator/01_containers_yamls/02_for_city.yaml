@@ -3,7 +3,7 @@
   vars:
     project_id: "arduino-tesis"
     bucket_name: "iot-sensor-data-raw"
-    service_account_key_path: "../../sa-ansible-key.json"
+    service_account_key_path: "../../../sa-ansible-key.json"
   block:
     - name: Obtener región para la ciudad
       set_fact:
@@ -11,17 +11,14 @@
         target_zone: "{{ city_regions[city_name].zone }}"
     
     - name: Listar archivos CSV en la carpeta de la ciudad
-      gcp_storage_object_info:
-        bucket: "{{ bucket_name }}"
-        prefix: "{{ city_name }}/"
-        project: "{{ project_id }}"
-        auth_kind: serviceaccount
-        service_account_file: "{{ service_account_key_path }}"
-      register: city_files
+      command: "gcloud storage ls gs://{{ bucket_name }}/{{ city_name }}/*.csv"
+      register: city_files_output
+      changed_when: false
       
     - name: Extraer solo nombres de archivos CSV
       set_fact:
-        csv_files: "{{ city_files.objects | selectattr('name', 'match', '.*\\.csv$') | map(attribute='name') | list }}"
+        # Extract relative path (e.g., "Antwerp/data.csv") from full GCS path
+        csv_files: "{{ city_files_output.stdout_lines | map('regex_replace', '^gs://' + bucket_name + '/', '') | list }}"
     
     - name: Verificar si hay archivos disponibles
       assert:

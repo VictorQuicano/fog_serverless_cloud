@@ -6,47 +6,37 @@
 
 - name: Generar nombre único para el servicio
   set_fact:
-    service_name: "sensor-{{ city_name }}-{{ container_number }}-{{ 100000 | random | string }}"
+    service_name: "sensor-{{ city_name | lower }}-{{ container_number }}-{{ 100000 | random | string }}"
 
-- name: Crear servicio Cloud Run
+- name: Definir archivo de cuenta de servicio
   set_fact:
-    service_account_file: "../../sa-ansible-key.json"
-  gcp_cloud_run_service:
-    name: "{{ service_name }}"
-    location: "{{ target_region }}"
-    project: "{{ project_id }}"
-    auth_kind: serviceaccount
-    service_account_file: "{{ service_account_file }}"
-    state: present
-    template:
-      containers:
-        - image: "gcr.io/{{ project_id }}/sensor-processor:latest"
-          env:
-            - name: BUCKET_NAME
-              value: "{{ bucket_name }}"
-            - name: ZONE
-              value: "{{ target_zone }}"
-            - name: CITY
-              value: "{{ city_name }}"
-            - name: FILE_TO_PROCESS
-              value: "{{ file_name }}"
-            - name: FILE_PATH
-              value: "{{ file_path }}"
-            - name: CONTAINER_ID
-              value: "{{ service_name }}"
-          resources:
-            limits:
-              cpu: 1000m
-              memory: 512Mi
-          # Si necesitas comandos específicos
-          # command: ["python", "processor.py"]
-          # args: ["--city", "{{ city_name }}", "--file", "{{ file_name }}"]
-      service_account_file: "{{ service_account_file }}"
-      timeout_seconds: 300
-    traffic:
-      - percent: 100
-        latest_revision: true
-  register: service_creation
+    service_account_file: "../../../sa-ansible-key.json"
+
+- name: Autenticar gcloud
+  command: "gcloud auth activate-service-account --key-file '{{ service_account_file }}'"
+  changed_when: false
+
+- name: Crear servicio Cloud Run (gcloud)
+  command: >
+    gcloud run deploy "{{ service_name }}"
+    --image "gcr.io/arduino-tesis/iot-sensor-simulator"
+    --region "{{ target_region }}"
+    --project "{{ project_id }}"
+    --set-env-vars "FILE_TO_PROCESS=gs://{{ bucket_name }}/{{ file_path }},TOPIC=projects/{{ project_id }}/topics/{{ city_name }},INTERVAL_SECONDS=60"
+    --memory 512Mi
+    --cpu 1
+    --timeout 300
+    --quiet
+  register: deploy_result
+  
+- name: Obtener URL del servicio
+  command: >
+    gcloud run services describe "{{ service_name }}"
+    --region "{{ target_region }}"
+    --project "{{ project_id }}"
+    --format "value(status.url)"
+  register: service_url
+  changed_when: false
 
 - name: Mostrar información del servicio creado
   debug:
@@ -55,4 +45,4 @@
       Servicio: {{ service_name }}
       Región: {{ target_region }}
       Archivo: {{ file_name }}
-      URL: {{ service_creation.status.url if service_creation.status is defined else 'Pendiente' }}
+      URL: {{ service_url.stdout }}

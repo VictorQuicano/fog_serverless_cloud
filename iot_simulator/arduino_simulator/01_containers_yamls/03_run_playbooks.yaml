@@ -3,7 +3,7 @@
   hosts: localhost
   gather_facts: no
   vars:
-    project_id: "tu-proyecto-id"
+    project_id: "arduino-tesis"
     
     # Mapeo de ciudades a regiones de GCP más cercanas
     city_regions:
