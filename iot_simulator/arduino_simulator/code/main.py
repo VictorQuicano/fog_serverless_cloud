@@ -8,6 +8,7 @@ from google.cloud import storage
 import logging
 import numpy as np
 import io
+import sys
 
 # Configurar logging
 logging.basicConfig(level=logging.INFO)
@@ -96,8 +97,11 @@ class IoTSensorSimulator:
             # Descargar contenido a memoria
             content = blob.download_as_bytes()
             
+            logger.info(f"Contenido descargado: {content}")
             # Leer CSV desde bytes
             df = pd.read_csv(io.BytesIO(content))
+            
+            logger.info(f"DataFrame leído: {df.columns}")
             return df
             
         except Exception as e:
@@ -292,6 +296,21 @@ class IoTSensorSimulator:
             self.state.is_running = False
             raise
 
+    def test_pubsub_connection(self):
+        """Verifica la conexión al topic de Pub/Sub"""
+        try:
+            # Intentar obtener información del topic
+            from google.cloud.pubsub_v1 import PublisherClient
+            publisher = PublisherClient()
+            
+            # Verificar que el topic existe
+            topic_info = publisher.get_topic(request={"topic": self.topic_path})
+            logger.info(f"Conexión a Pub/Sub exitosa. Topic: {topic_info.name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error de conexión a Pub/Sub: {str(e)}")
+            return False
 
 def parse_gcs_path(file_path):
     """Determina si la ruta es GCS y la parsea"""
@@ -348,14 +367,65 @@ def reset_counters():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+@app.route('/config')
+def get_config():
+    """Endpoint para verificar la configuración"""
+    config = {
+        "csv_file": os.environ.get('FILE_TO_PROCESS'),
+        "topic": os.environ.get('TOPIC'),
+        "interval": os.environ.get('INTERVAL_SECONDS', '60'),
+        "simulator_running": simulator_instance is not None if simulator_instance else False,
+        "simulation_state_running": simulation_state.is_running,
+        "timestamp": datetime.now().isoformat()
+    }
+    return jsonify(config), 200
+
+@app.route('/diagnostic')
+def diagnostic():
+    """Endpoint de diagnóstico completo"""
+    import threading
+    import traceback
+    
+    threads_info = []
+    for thread in threading.enumerate():
+        threads_info.append({
+            'name': thread.name,
+            'ident': thread.ident,
+            'alive': thread.is_alive(),
+            'daemon': thread.daemon
+        })
+    
+    diagnostic_info = {
+        "timestamp": datetime.now().isoformat(),
+        "python_version": sys.version,
+        "environment_vars": {
+            "FILE_TO_PROCESS": os.environ.get('FILE_TO_PROCESS'),
+            "TOPIC": os.environ.get('TOPIC'),
+            "INTERVAL_SECONDS": os.environ.get('INTERVAL_SECONDS', '60'),
+            "PORT": os.environ.get('PORT', '8080')
+        },
+        "simulation_state": simulation_state.get_stats() if simulation_state else None,
+        "simulator_instance": simulator_instance is not None,
+        "active_threads": threads_info,
+        "thread_count": threading.active_count()
+    }
+    
+    return jsonify(diagnostic_info), 200
+
 def run_simulation_thread(csv_file, topic, interval):
     global simulator_instance, simulation_state
+    
+    logger.info(f"Iniciando hilo de simulación con: CSV={csv_file}, Topic={topic}, Interval={interval}s")
+    
+    # Pequeña pausa para asegurar que Flask está iniciado
+    time.sleep(3)
     
     # Determinar si es GCS o local
     use_gcs, processed_path = parse_gcs_path(csv_file)
     
     # Crear y ejecutar simulador
     try:
+        logger.info("Creando instancia de IoTSensorSimulator...")
         simulator_instance = IoTSensorSimulator(
             csv_file=processed_path,
             topic_path=topic,
@@ -363,12 +433,23 @@ def run_simulation_thread(csv_file, topic, interval):
             state=simulation_state
         )
         
+        # Test de conexión
+        logger.info("Probando conexión a Pub/Sub...")
+        if not simulator_instance.test_pubsub_connection():
+            logger.error("Fallo en la conexión a Pub/Sub. Revisar permisos y configuración.")
+            return
+        
+        logger.info("Conexión a Pub/Sub establecida exitosamente")
+        logger.info(f"Total de filas a procesar: {len(simulator_instance.df)}")
+        
         # Ejecutar simulación continua
+        logger.info("Iniciando simulación continua...")
         simulator_instance.simulate_sensor(interval_seconds=interval)
         
     except Exception as e:
-        logger.error(f"Error en la ejecución de la simulación: {str(e)}")
+        logger.error(f"Error crítico en la ejecución de la simulación: {str(e)}", exc_info=True)
         simulation_state.is_running = False
+        raise
 
 def main():
     # Obtener variables de entorno
@@ -377,22 +458,45 @@ def main():
     interval = int(os.environ.get('INTERVAL_SECONDS', '60'))
     port = int(os.environ.get('PORT', 8080))
     
+    logger.info(f"=== CONFIGURACIÓN ===")
+    logger.info(f"CSV File: {csv_file}")
+    logger.info(f"Topic: {topic}")
+    logger.info(f"Interval: {interval} segundos")
+    logger.info(f"Port: {port}")
+    
     if not csv_file or not topic:
-        logger.error("Las variables de entorno FILE_TO_PROCESS y TOPIC deben estar definidas")
+        logger.error("ERROR: Las variables de entorno FILE_TO_PROCESS y TOPIC deben estar definidas")
+        logger.error(f"FILE_TO_PROCESS={csv_file}")
+        logger.error(f"TOPIC={topic}")
         return
     
+    # Verificar que el topic tenga el formato correcto
+    if not topic.startswith('projects/'):
+        topic = f"projects/arduino-tesis/topics/{topic}"
+        logger.info(f"Formateando topic: {topic}")
+    
     # Iniciar simulación en un hilo separado
+    logger.info("Iniciando hilo de simulación...")
     simulation_thread = threading.Thread(
         target=run_simulation_thread, 
         args=(csv_file, topic, interval),
-        daemon=True
+        daemon=True,
+        name="SimulationThread"
     )
     simulation_thread.start()
     
-    # Iniciar servidor Flask (bloqueante)
-    logger.info(f"Iniciando servidor web en puerto {port}")
-    logger.info(f"Endpoint de estadísticas disponible en: http://localhost:{port}/stats")
-    app.run(host='0.0.0.0', port=port)
+    # NO ejecutar app.run() - Cloud Run ejecutará el servidor WSGI directamente
+    # En Cloud Run, simplemente retornamos y el servidor WSGI manejará las solicitudes
+    
+    logger.info(f"=== APLICACIÓN INICIADA ===")
+    logger.info(f"Hilo de simulación activo: {simulation_thread.is_alive()}")
 
+# Para ejecución local, mantener esta sección
 if __name__ == "__main__":
-    main()
+    try:
+        logger.info("=== INICIANDO APLICACIÓN IOT SENSOR SIMULATOR ===")
+        logger.info(f"Python version: {sys.version}")
+        main()
+    except Exception as e:
+        logger.error(f"Error fatal al iniciar la aplicación: {str(e)}", exc_info=True)
+        raise

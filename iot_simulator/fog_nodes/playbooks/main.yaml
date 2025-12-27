@@ -1,0 +1,3 @@
+---
+- import_playbook: 01_create_infrastructure.yaml
+- import_playbook: 02_configure_nodes.yaml

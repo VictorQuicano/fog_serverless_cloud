@@ -1,0 +1,85 @@
+---
+- name: Crear infraestructura para Fog Nodes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    project_id: "arduino-tesis"
+    service_account_file: "../../../sa-ansible-key.json"
+    city_configs:
+      Antwerp:
+        region: "europe-west1"
+        zone: "europe-west1-b"
+        subscription: "sub-antwerp-fog"
+      Oslo:
+        region: "europe-north1"
+        zone: "europe-north1-a"
+        subscription: "sub-oslo-fog"
+      Zagreb:
+        region: "europe-central2"
+        zone: "europe-central2-a"
+        subscription: "sub-zagreb-fog"
+
+  tasks:
+    - name: Autenticar gcloud
+      command: "gcloud auth activate-service-account --key-file '{{ service_account_file }}'"
+      changed_when: false
+
+    - name: Configurar proyecto
+      command: "gcloud config set project {{ project_id }}"
+      changed_when: false
+
+    - name: Crear suscripciones Pub/Sub para cada ciudad
+      command: >
+        gcloud pubsub subscriptions create {{ item.value.subscription }}
+        --topic=projects/{{ project_id }}/topics/{{ item.key }}
+        --ack-deadline=60
+      args:
+        creates: no # Ojo, gcloud fallará si ya existe, manejamos error con ignore_errors o chequeo previo.
+      loop: "{{ city_configs | dict2items }}"
+      register: sub_creation
+      failed_when: 
+        - sub_creation.rc != 0 
+        - "'Resource already exists' not in sub_creation.stderr"
+      changed_when: sub_creation.rc == 0
+
+    - name: Crear instancias GCE para Fog Nodes
+      command: >
+        gcloud compute instances create fog-node-{{ item.key | lower }}
+        --project={{ project_id }}
+        --zone={{ item.value.zone }}
+        --machine-type=e2-medium
+        --image-family=debian-11
+        --image-project=debian-cloud
+        --scopes=https://www.googleapis.com/auth/pubsub,https://www.googleapis.com/auth/bigquery,https://www.googleapis.com/auth/logging.write
+        --tags=fog-node,http-server
+        --metadata=city={{ item.key }},subscription={{ item.value.subscription }}
+      loop: "{{ city_configs | dict2items }}"
+      register: instance_creation
+      failed_when: 
+        - instance_creation.rc != 0 
+        - "'already exists' not in instance_creation.stderr"
+      changed_when: instance_creation.rc == 0
+
+    - name: Configurar SSH local para las instancias (gcloud)
+      command: gcloud compute config-ssh --project={{ project_id }} --quiet
+      changed_when: false
+
+    - name: Obtener información de las instancias creadas
+      command: >
+        gcloud compute instances list 
+        --project={{ project_id }}
+        --filter="tags.items=fog-node"
+        --format="json(name, zone, metadata.items)"
+      register: instances_info
+      changed_when: false
+
+    - name: Agregar hosts al inventario dinámico
+      add_host:
+        name: "{{ item.name }}.{{ item.zone.split('/')[-1] }}.{{ project_id }}" # Nombre completo FQDN generado por config-ssh
+        groups: fog_nodes
+        # Mapear metadata a variables de host
+        subscription: "{{ (item.metadata['items'] | selectattr('key', 'equalto', 'subscription') | map(attribute='value') | list)[0] }}"
+        city: "{{ (item.metadata['items'] | selectattr('key', 'equalto', 'city') | map(attribute='value') | list)[0] }}"
+      loop: "{{ (instances_info.stdout | from_json) }}"
+

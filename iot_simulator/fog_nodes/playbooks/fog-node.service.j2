@@ -1,0 +1,19 @@
+[Unit]
+Description=IoT Fog Node Service
+After=network.target
+
+[Service]
+Type=simple
+User={{ ansible_user_id }}
+WorkingDirectory=/opt/fog_node/code
+Environment="PROJECT_ID={{ project_id }}"
+Environment="SUBSCRIPTION_ID={{ subscription_id }}"
+Environment="DATASET_ID=iot_data"
+Environment="TABLE_ID=sensor_readings"
+Environment="HOSTNAME=%H"
+ExecStart=/usr/bin/python3 /opt/fog_node/code/fog_node.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

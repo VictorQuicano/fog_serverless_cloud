@@ -1,0 +1,78 @@
+---
+- name: Configurar Fog Nodes
+  hosts: fog_nodes
+  gather_facts: false
+  vars:
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+  tasks:
+    - name: Esperar a que la conexión SSH esté lista
+      wait_for_connection:
+        delay: 5
+        timeout: 300
+
+    - name: Recopilar facts (setup)
+      setup:
+
+    - name: Instalar dependencias del sistema
+      become: true
+      apt:
+        name: 
+          - python3-pip
+          - python3-venv
+          - git
+        state: present
+        update_cache: yes
+
+    - name: Crear directorio de la aplicación
+      become: true
+      file:
+        path: /opt/fog_node
+        state: directory
+        mode: '0755'
+        owner: "{{ ansible_user_id }}"
+
+    - name: Copiar código fuente
+      become: true
+      copy:
+        src: ../code/
+        dest: /opt/fog_node/code/
+        mode: '0755'
+
+    - name: Instalar dependencias Python
+      become: true
+      pip:
+        requirements: /opt/fog_node/code/requirements.txt
+        executable: pip3
+        executable: pip3
+
+    - name: Crear servicio systemd
+      become: true
+      template:
+        src: fog-node.service.j2
+        dest: /etc/systemd/system/fog-node.service
+        mode: '0644'
+      vars:
+        # Obtener metadata de la instancia para configurar variables de entorno
+        # Esto requiere que 'gcp_compute_instance_facts' o similar esté disponible,
+        # o podemos inyectarlas si usamos un inventario estático generado.
+        # Alternativa: consultar metadata server local desde la instancia en el script de arranque,
+        # O pasar variables Ansible.
+        subscription_id: "{{ subscription }}" 
+        project_id: "arduino-tesis"
+      notify: Reiniciar servicio
+
+    - name: Iniciar y habilitar servicio
+      become: true
+      systemd:
+        name: fog-node
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+  handlers:
+    - name: Reiniciar servicio
+      become: true
+      systemd:
+        name: fog-node
+        state: restarted

@@ -26,6 +26,7 @@
     --memory 512Mi
     --cpu 1
     --timeout 300
+    --allow-unauthenticated
     --quiet
   register: deploy_result
   
