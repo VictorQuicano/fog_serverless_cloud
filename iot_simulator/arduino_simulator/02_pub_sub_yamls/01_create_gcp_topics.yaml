@@ -1,10 +1,11 @@
 ---
 - name: Crear topics de Pub/Sub en GCP
   hosts: localhost
-  gather_facts: no
+  connection: local
+  gather_facts: false
   
   vars:
-    project_id: "arduino_tesis"
+    project_id: "arduino-tesis"
     service_account_key_file: "../../../sa-ansible-key.json"
     topics:
       - Antwerp
@@ -12,19 +13,19 @@
       - Zagreb
   
   tasks:
+    - name: Verificar archivo de credenciales
+      ansible.builtin.stat:
+        path: "{{ service_account_key_file }}"
+      register: cred_file
+    
+    - name: Falla si no existe el archivo de credenciales
+      ansible.builtin.fail:
+        msg: "Archivo de credenciales no encontrado: {{ service_account_key_file }}"
+      when: not cred_file.stat.exists
+    
     - name: Configurar credenciales de GCP
       ansible.builtin.set_fact:
-        gcp_credential: "{{ lookup('file', service_account_key_file) | from_json }}"
-    
-    - name: Autenticar en GCP
-      google.cloud.gcp_auth:
-        project: "{{ project_id }}"
-        auth_kind: serviceaccount
-        service_account_file: "{{ service_account_key_file }}"
-        scopes:
-          - https://www.googleapis.com/auth/pubsub
-          - https://www.googleapis.com/auth/cloud-platform
-      register: gcp_auth
+        gcp_credential: "{{ lookup('ansible.builtin.file', service_account_key_file) | from_json }}"
     
     - name: Crear topics de Pub/Sub
       google.cloud.gcp_pubsub_topic:
@@ -32,14 +33,16 @@
         project: "{{ project_id }}"
         auth_kind: serviceaccount
         service_account_file: "{{ service_account_key_file }}"
+        scopes:
+          - https://www.googleapis.com/auth/pubsub
+          - https://www.googleapis.com/auth/cloud-platform
         state: present
       loop: "{{ topics }}"
       register: topic_results
     
     - name: Mostrar resultados
       ansible.builtin.debug:
-        msg: "Topic '{{ item.name }}' creado exitosamente"
+        msg: "Topic '{{ item.item }}' - Estado: {{ 'Creado' if item.changed else 'Ya existía' }}"
       loop: "{{ topic_results.results }}"
-      when: item.changed
       loop_control:
-        label: "{{ item.topic }}"
+        label: "{{ item.item }}"

@@ -1,0 +1,6 @@
+google-cloud-pubsub
+google-cloud-storage
+pandas
+numpy
+flask
+pandas-gbq
