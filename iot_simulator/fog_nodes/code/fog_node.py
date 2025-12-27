@@ -120,6 +120,15 @@ class FogNode:
             # Sanitizar claves (especialmente Location.ID -> Location_ID)
             data_json = sanitize_keys(data_json)
             
+            # Filtrar campos de location_info para asegurar coincidencia con Schema de BQ
+            # main.py puede enviar campos extra (como Ref_Long) que BQ rechaza si no están en el esquema
+            if 'location_info' in data_json and isinstance(data_json['location_info'], dict):
+                valid_loc_keys = ['latitude', 'longitude', 'altitude', 'Location_ID']
+                data_json['location_info'] = {
+                    k: v for k, v in data_json['location_info'].items() 
+                    if k in valid_loc_keys
+                }
+            
             # Enriquecer con datos del nodo
             data_json['processing_timestamp'] = datetime.utcnow().isoformat() + "Z"
             data_json['processing_node'] = os.environ.get('HOSTNAME', 'unknown-node')

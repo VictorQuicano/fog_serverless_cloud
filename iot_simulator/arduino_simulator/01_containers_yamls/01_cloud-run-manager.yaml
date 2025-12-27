@@ -16,34 +16,31 @@
   command: "gcloud auth activate-service-account --key-file '{{ service_account_file }}'"
   changed_when: false
 
-- name: Crear servicio Cloud Run (gcloud)
+- name: Crear Cloud Run Job (gcloud)
   command: >
-    gcloud run deploy "{{ service_name }}"
+    gcloud run jobs create "{{ service_name }}"
     --image "gcr.io/arduino-tesis/iot-sensor-simulator"
     --region "{{ target_region }}"
     --project "{{ project_id }}"
     --set-env-vars "FILE_TO_PROCESS=gs://{{ bucket_name }}/{{ file_path }},TOPIC=projects/{{ project_id }}/topics/{{ city_name }},INTERVAL_SECONDS=60"
-    --memory 512Mi
-    --cpu 1
-    --timeout 300
-    --allow-unauthenticated
+    --memory 4Gi
+    --task-timeout 24h
     --quiet
   register: deploy_result
-  
-- name: Obtener URL del servicio
+
+- name: Ejecutar Cloud Run Job
   command: >
-    gcloud run services describe "{{ service_name }}"
+    gcloud run jobs execute "{{ service_name }}"
     --region "{{ target_region }}"
     --project "{{ project_id }}"
-    --format "value(status.url)"
-  register: service_url
-  changed_when: false
+    --quiet
+  register: execute_result
 
-- name: Mostrar información del servicio creado
+- name: Mostrar información del job creado
   debug:
     msg: |
       Ciudad: {{ city_name }}
-      Servicio: {{ service_name }}
+      Job: {{ service_name }}
       Región: {{ target_region }}
       Archivo: {{ file_name }}
-      URL: {{ service_url.stdout }}
+      Execution ID: {{ execute_result.stdout if execute_result.stdout is defined else 'Unknown' }}
